@@ -1,13 +1,13 @@
 //! Video Cache Warmer at the ege. This app works on HLS only. Once it reads a playlist manifest
 //! it makes calls for the first X video segments so that they will be in cache.
 
-use config::{Config, FileFormat};
-use fastly::http::request::{PendingRequest, SendError};
+// use fastly::http::request::{PendingRequest, SendError};
 use fastly::http::{header, Method, StatusCode};
 use fastly::{Error, Request, Response};
 use lazy_static::lazy_static;
 use m3u8_rs::playlist::{MediaPlaylist, Playlist};
 use regex::Regex;
+use std::str;
 
 /// The name of a backend server associated with this service.
 ///
@@ -28,7 +28,11 @@ const NUM_SEGMENTS_TO_PRELOAD: usize = 5;
 #[fastly::main]
 fn main(req: Request) -> Result<Response, Error> {
     // Make sure we are running the version we think we are.
-    println!("Video Cache Warmer version:{}", get_version());
+
+    println!(
+        "Video Cache Warmer version:{}",
+        std::env::var("FASTLY_SERVICE_VERSION").unwrap_or_else(|_| String::new())
+    );
 
     // Filter request methods...
     match req.get_method() {
@@ -42,9 +46,11 @@ fn main(req: Request) -> Result<Response, Error> {
         _ => {
             return Ok(Response::from_status(StatusCode::METHOD_NOT_ALLOWED)
                 .with_header(header::ALLOW, "GET, HEAD")
-                .with_body_str("This method is not allowed\n"))
+                .with_body_text_plain("This method is not allowed\n"))
         }
     };
+
+    // req.get_header_str() = None;
 
     // If this is an m3u8 file parse it, other wise let it fall through to the backend.
     if req.get_path().ends_with(".m3u8") && req.get_method() == Method::GET {
@@ -121,20 +127,3 @@ fn get_path_to_m3u8(input: &str) -> std::string::String {
     capture.as_deref().unwrap_or("").to_string()
 }
 
-/// This function reads the fastly.toml file and gets the deployed version. This is only run at
-/// compile time. Since we bump the version number after building (during the deploy) we return
-/// the version incremented by one so the version returned will match the deployed version.
-/// NOTE: If the version is incremented by Tango this might be inaccurate.
-fn get_version() -> i32 {
-    Config::new()
-        .merge(config::File::from_str(
-            include_str!("../fastly.toml"), // assumes the existence of fastly.toml
-            FileFormat::Toml,
-        ))
-        .unwrap()
-        .get_str("version")
-        .unwrap()
-        .parse::<i32>()
-        .unwrap_or(0)
-        + 1
-}
